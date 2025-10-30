@@ -1,4 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
+import { items as itemsSDK } from "@wix/data";
+import { createClient, OAuthStrategy } from "@wix/sdk";
 import { useEffect, useRef, useState } from "react";
 
 // Type pour une section
@@ -8,7 +11,7 @@ interface Section {
   buttonText: string;
   buttonLink?: string;
   backgroundImage: string;
-  backgroundOverlay?: string; // Overlay semi-transparent
+  backgroundOverlay?: string;
 }
 
 // Type pour une page
@@ -16,6 +19,17 @@ interface PageData {
   id: string;
   name: string;
   sections: Section[];
+}
+
+// Type pour les items Wix (correspondant exactement à votre structure)
+interface WixItem {
+  _id: string;
+  title: string;
+  description: string;
+  image: string;
+  url: string;
+  buttonText: string;
+  pageName: string;
 }
 
 // Page Component
@@ -105,12 +119,12 @@ function ScrollPage({
               backgroundPosition: "center",
               backgroundRepeat: "no-repeat",
             }}
+            onError={(e) => {
+              console.error('Erreur de chargement image pour:', section.title, section.backgroundImage);
+            }}
           >
             {/* Overlay pour améliorer la lisibilité */}
-            <div
-              className="absolute inset-0 bg-black/40"
-              // style={{ backgroundColor: section.backgroundOverlay || "rgba(0, 0, 0, 0.4)" }}
-            />
+            <div className="absolute inset-0 bg-black/40" />
 
             {/* Contenu */}
             <div className="relative z-10 max-w-2xl ml-12 md:ml-20 lg:ml-32 text-white space-y-6">
@@ -141,8 +155,8 @@ function ScrollPage({
           <div
             key={i}
             className={`w-2 h-2 rounded-full transition-all ${(currentIndex % sections.length) === i
-                ? "bg-white h-8"
-                : "bg-white/40"
+              ? "bg-white h-8"
+              : "bg-white/40"
               }`}
           />
         ))}
@@ -155,50 +169,111 @@ export default function Home() {
   const horizontalScrollRef = useRef<HTMLDivElement>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const isHorizontalScrolling = useRef(false);
+  const [pages, setPages] = useState<PageData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Données des pages - À PERSONNALISER
-  const pages: PageData[] = [
-    {
-      id: "collection-automne",
-      name: "Collection Automne",
-      sections: Array.from({ length: 10 }, (_, i) => ({
-        title: `Collection Automne ${i + 1}`,
-        description: "Découvrez notre nouvelle collection automne avec des pièces élégantes et confortables pour toute la famille.",
-        buttonText: "Découvrir",
-        buttonLink: "#",
-        backgroundImage: `/images/automne/section-${i + 1}.jpg`,
-        backgroundOverlay: "rgba(139, 69, 19, 0.4)", // Overlay marron/automne
-      })),
+  // Initialiser le client Wix
+  const wixClient = createClient({
+    modules: {
+      itemsSDK,
     },
-    {
-      id: "mode-printemps",
-      name: "Mode Printemps",
-      sections: Array.from({ length: 10 }, (_, i) => ({
-        title: `Printemps Frais ${i + 1}`,
-        description: "Des couleurs vives et des tissus légers pour célébrer le renouveau du printemps avec style.",
-        buttonText: "Voir Plus",
-        buttonLink: "#",
-        backgroundImage: `/images/printemps/section-${i + 1}.jpg`,
-        backgroundOverlay: "rgba(52, 152, 219, 0.4)", // Overlay bleu/printemps
-      })),
-    },
-    {
-      id: "style-ete",
-      name: "Style Été",
-      sections: Array.from({ length: 10 }, (_, i) => ({
-        title: `Été Radieux ${i + 1}`,
-        description: "Profitez du soleil avec notre collection estivale : légère, colorée et parfaite pour la plage.",
-        buttonText: "Explorer",
-        buttonLink: "#",
-        backgroundImage: `/images/ete/section-${i + 1}.jpg`,
-        backgroundOverlay: "rgba(231, 76, 60, 0.4)", // Overlay rouge/été
-      })),
-    },
-  ];
+    auth: OAuthStrategy({
+      clientId: process.env.NEXT_PUBLIC_WIX_CLIENT_ID!
+    })
+  });
 
-  const extendedPages = [...pages, ...pages, ...pages];
+  // Fonction pour convertir l'URL Wix en URL utilisable
+  const convertWixImageUrl = (wixUrl: string): string => {
+    console.log('URL originale:', wixUrl);
+
+    // Format: wix:image://v1/4336f3_xxx~mv2.jpg/filename.jpg#params
+    if (wixUrl.startsWith('wix:image://')) {
+      // Extraire la partie entre v1/ et le # (ou /)
+      const match = wixUrl.match(/v1\/(.*?)(?:\/|#)/);
+      if (match) {
+        const mediaId = match[1];
+        const convertedUrl = `https://static.wixstatic.com/media/${mediaId}`;
+        console.log('URL convertie:', convertedUrl);
+        return convertedUrl;
+      }
+    }
+
+    // Si ce n'est pas une URL wix:image://, retourner telle quelle
+    console.log('URL non modifiée:', wixUrl);
+    return wixUrl;
+  };
+
+  // Récupérer les données depuis Wix CMS
+  useEffect(() => {
+    const fetchWixData = async () => {
+      try {
+        setLoading(true);
+
+        // Remplacez par le nom exact de votre collection
+        const response = await wixClient.itemsSDK.query("HomePage").find();
+
+        console.log('Réponse complète:', response);
+
+        if (!response.items || response.items.length === 0) {
+          setError("Aucune donnée trouvée dans la collection");
+          setLoading(false);
+          return;
+        }
+
+        // Grouper les items par pageName
+        const groupedByPage: { [key: string]: WixItem[] } = {};
+
+        response.items.forEach((item: any) => {
+          // Les données sont directement au niveau de l'item, pas dans item.data
+          const wixItem: WixItem = {
+            _id: item._id || '',
+            title: item.title || '',
+            description: item.description || '',
+            image: item.image || '',
+            url: item.url || '',
+            buttonText: item.buttonText || 'Découvrir',
+            pageName: item.pageName || 'Default',
+          };
+
+          if (!groupedByPage[wixItem.pageName]) {
+            groupedByPage[wixItem.pageName] = [];
+          }
+          groupedByPage[wixItem.pageName].push(wixItem);
+        });
+
+        // Convertir en format PageData
+        const pagesData: PageData[] = Object.entries(groupedByPage).map(([pageName, items]) => ({
+          id: pageName.toLowerCase().replace(/\s+/g, '-'),
+          name: pageName,
+          sections: items.map((item) => ({
+            title: item.title,
+            description: item.description,
+            buttonText: item.buttonText,
+            buttonLink: item.url,
+            backgroundImage: convertWixImageUrl(item.image),
+            backgroundOverlay: "rgba(0, 0, 0, 0.4)",
+          })),
+        }));
+
+        console.log('Pages formatées:', pagesData);
+        setPages(pagesData);
+        setLoading(false);
+      } catch (err) {
+        console.error("Erreur lors de la récupération des données Wix:", err);
+        setError(`Erreur lors du chargement des données: ${err}`);
+        setLoading(false);
+      }
+    };
+
+    fetchWixData();
+  }, []);
+
+  const extendedPages = pages.length > 0 ? [...pages, ...pages, ...pages] : [];
 
   useEffect(() => {
+    if (pages.length === 0) return;
+
     const container = horizontalScrollRef.current;
     if (!container) return;
 
@@ -274,6 +349,34 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Affichage du chargement
+  if (loading) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
+        <div className="text-white text-2xl animate-pulse">Chargement des données...</div>
+      </div>
+    );
+  }
+
+  // Affichage de l'erreur
+  if (error) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-gray-900 p-8">
+        <div className="text-red-500 text-2xl mb-4">❌ {error}</div>
+        <div className="text-white/60 text-sm">Vérifiez la console pour plus de détails</div>
+      </div>
+    );
+  }
+
+  // Affichage si aucune page
+  if (pages.length === 0) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-gray-900">
+        <div className="text-white text-2xl">Aucune page à afficher</div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative h-screen w-screen overflow-hidden">
       <div
@@ -311,8 +414,8 @@ export default function Home() {
           <div
             key={page.id}
             className={`w-2 h-2 rounded-full transition-all ${(currentPageIndex % pages.length) === i
-                ? "bg-white w-8"
-                : "bg-white/40"
+              ? "bg-white w-8"
+              : "bg-white/40"
               }`}
           />
         ))}
