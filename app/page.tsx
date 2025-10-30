@@ -12,6 +12,7 @@ interface Section {
   buttonLink?: string;
   backgroundImage: string;
   backgroundOverlay?: string;
+  test?: string,
 }
 
 // Type pour une page
